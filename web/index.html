@@ -133,6 +133,13 @@
         <option value="1">Normal</option>
       </select>
     </label>
+    <label class="small voice-only" title="Low ignores sound from your own speakers; use High with headphones">Mic sensitivity
+      <select id="sens">
+        <option value="low">Low (speakers)</option>
+        <option value="medium">Medium</option>
+        <option value="high">High (headphones)</option>
+      </select>
+    </label>
     <label class="small voice-only">Reply after
       <select id="pause">
         <option value="650">a short pause</option>
@@ -154,7 +161,7 @@
 </div></form>
 
 <script>
-const UI_VERSION = 'v10-host';
+const UI_VERSION = 'v11-smooth';
 let conversationId = null;          // one saved conversation per 'Start conversation' (or per page visit when typing)
 const $ = id => document.getElementById(id);
 const store = { get(k, d) { try { return localStorage.getItem(k) ?? d; } catch { return d; } },
@@ -260,7 +267,7 @@ async function ttsSlot(fn) {
   try { return await fn(); } finally { ttsActive--; ttsWaiters.shift()?.(); }
 }
 
-function fetchNk(text, myTurn, tries = 2) {
+function fetchNk(text, myTurn, tries = 3) {
   return ttsSlot(() => fetch('/api/tts', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ text, speed: pace() }) })
     .then(async r => {
       if (r.status === 401) { location.href = '/login'; throw new Error('locked'); }
@@ -271,30 +278,34 @@ function fetchNk(text, myTurn, tries = 2) {
     .catch(async e => {
       const busy = /busy|rate limit|HTTP 5\d\d/i.test(e.message);
       if (busy && tries > 0 && myTurn === turnId) {              // momentary overload: wait and try again
-        await new Promise(r => setTimeout(r, 900));
+        await new Promise(r => setTimeout(r, 700 * (4 - tries)));
         return fetchNk(text, myTurn, tries - 1);
       }
-      if (myTurn === turnId) {
-        if (!busy) { nkDownThisTurn = true; nkAvailable = false; $('nkBad').hidden = false; }
-        notice(busy ? 'ElevenLabs is busy right now, so one sentence used the machine voice.'
-                    : `NK voice unavailable (${e.message}). Using machine voice.`);
+      if (myTurn === turnId) {                                    // never switch voices mid-answer
+        if (!busy) { nkAvailable = false; $('nkBad').hidden = false; }
+        notice(busy ? 'ElevenLabs was busy, so part of this answer is shown as text only.'
+                    : `NK voice unavailable (${e.message}). Part of this answer is shown as text only.`);
       }
       return null;
     });
 }
 
-function enqueue(text, blobPromise, filler = false) {
+function enqueue(text, blobPromise, filler = false, nk = false) {
   echoRef += ' ' + text;
-  queue.push({ text, blob: blobPromise, turn: turnId, filler });
+  queue.push({ text, blob: blobPromise, turn: turnId, filler, nk });
   if (!playing) playNext();
 }
 function speak(sentence) {
   sentence = sentence.trim();
   if (!sentence || voiceMode === 'off') return;
+  // One voice per answer: NK voice if it was available when the answer started, else the machine voice.
   const useNk = voiceMode === 'nk' && !nkDownThisTurn;
-  enqueue(sentence, useNk ? fetchNk(sentence, turnId) : Promise.resolve(null));
+  enqueue(sentence, useNk ? fetchNk(sentence, turnId) : Promise.resolve(null), false, useNk);
 }
-function speakText(text) { (text.match(/[^.!?।]+[.!?।]*["')\]]?\s*/g) || [text]).forEach(speak); }
+function speakText(text) {             // NK voice: one smooth clip; machine voice: sentence by sentence
+  if (voiceMode === 'nk' && !nkDownThisTurn && text.length < 450) return speak(text);
+  (text.match(/[^.!?।]+[.!?।]*["')\]]?\s*/g) || [text]).forEach(speak);
+}
 
 async function playNext() {
   const item = queue.shift();
@@ -302,13 +313,14 @@ async function playNext() {
   playing = true;
   const blob = await item.blob;
   if (item.turn !== turnId) return playNext();
+  if (item.nk && !blob) return playNext();          // NK clip failed: skip it rather than switch to the machine voice
   speaking = true; thinking = false; $('live').textContent = '';
   const via = blob ? 'NK Chaudhary voice' : 'Machine voice';
   updateState(via); if (!item.filler) markVia(via);
   try { blob ? await playBlob(blob) : await machineSpeak(item.text); } catch (e) { console.warn(e); }
   lastSpokeAt = Date.now();
-  // a short breath between sentences, longer when speaking slowly
-  if (queue.length && item.turn === turnId && !item.filler) await new Promise(r => setTimeout(r, Math.round(380 / pace())));
+  // machine voice: a short breath between sentences (the NK voice already has natural pauses)
+  if (!blob && queue.length && item.turn === turnId && !item.filler) await new Promise(r => setTimeout(r, Math.round(300 / pace())));
   if (item.turn !== turnId) return;     // interrupted during the pause: the new turn runs its own queue
   playNext();
 }
@@ -387,7 +399,11 @@ async function ask(text, { spoken = false } = {}) {
   thinking = true; updateState();
   if (spoken && voiceMode !== 'off') setTimeout(() => playFiller(myTurn), 1100);
   chatAbort = new AbortController();
-  let full = '', pending = '', first = true;
+  let full = '', pending = '', first = true, chunk = '', spokenParts = 0;
+  const say = (piece, force = false) => {          // first piece alone, then group sentences into ~200-char clips
+    chunk += piece + ' ';
+    if (force || spokenParts === 0 || chunk.length >= 200) { speak(chunk); chunk = ''; spokenParts++; }
+  };
   try {
     const r = await fetch('/api/chat', { method:'POST', headers:{'Content-Type':'application/json'},
       body: JSON.stringify({ message: text, history, mode: spoken ? 'voice' : 'text', conversation_id: conversationId }), signal: chatAbort.signal });
@@ -407,14 +423,14 @@ async function ask(text, { spoken = false } = {}) {
         if (ev.delta) {
           full += ev.delta; pending += ev.delta; body.textContent = full; $('log').scrollTop = $('log').scrollHeight;
           let m; while ((m = pending.match(SENTENCE_END))) {
-            const cut = m.index + m[1].length; speak(pending.slice(0, cut)); pending = pending.slice(cut).trimStart(); first = false;
+            const cut = m.index + m[1].length; say(pending.slice(0, cut)); pending = pending.slice(cut).trimStart(); first = false;
           }
           // start talking sooner: speak a long first clause at its comma instead of waiting for the full stop
-          if (first && pending.length > 70) { const c = pending.lastIndexOf(', '); if (c > 30) { speak(pending.slice(0, c + 1)); pending = pending.slice(c + 2); first = false; } }
+          if (first && pending.length > 70) { const c = pending.lastIndexOf(', '); if (c > 30) { say(pending.slice(0, c + 1)); pending = pending.slice(c + 2); first = false; } }
         }
       }
     }
-    if (myTurn === turnId) speak(pending);
+    if (myTurn === turnId) say(pending, true);
   } catch (err) { if (err.name !== 'AbortError') add('err', err.message); }
   if (myTurn === turnId) { thinking = false; chatAbort = null; }
   if (full) { history.push({ role:'user', content:text }, { role:'assistant', content: full + (myTurn !== turnId ? ' …' : '') }); lastAnswer = full; }
@@ -450,6 +466,15 @@ function isEcho(t, need = 0.6) {   // is the mic hearing his own voice from the 
 }
 const busy = () => speaking || playing || thinking;
 
+// How easily your voice interrupts him / starts your turn. Low needs a clearly louder voice AND real words,
+// so his own voice coming out of the laptop speakers can't interrupt him.
+const SENS = {
+  low:    { echoMul: 5, minThr: 0.06,  bargeMs: 450, needWords: true,  startMs: 260, startMin: 0.022 },
+  medium: { echoMul: 4, minThr: 0.045, bargeMs: 380, needWords: false, startMs: 180, startMin: 0.016 },
+  high:   { echoMul: 3, minThr: 0.03,  bargeMs: 280, needWords: false, startMs: 120, startMin: 0.012 },
+};
+const sens = () => SENS[$('sens').value] || SENS.low;
+
 /* ---------- browser speech recogniser (kept alive, restarted when Chrome drops it) ---------- */
 function startRec() {
   if (!convo || recOn || recStarting) return;
@@ -475,8 +500,10 @@ function startRec() {
     }
     if (busy()) {
       if (words(heard).length < 2) return;                          // wait for a clear word or two
+      if (sens().needWords && micAnalyser && Date.now() - lastLoudAt > 700) return;   // words but no loud voice: echo
       bargeIn();
-      return;                                                       // the next result carries your words
+      segStart = Math.min(segStart, e.resultIndex);                 // keep the words that interrupted him
+      return rec.onresult(e);                                       // ...and treat them as the start of your turn
     }
     utter = heard; heardFinal = allFinal; lastHeardAt = Date.now();
     if (!turnActive) beginTurn();
@@ -581,10 +608,11 @@ function endpointTick() {
   const hisVoice = speaking || playing;                     // his voice may leak from the speakers into the mic
   if (hisVoice) { echoWin.push(rms); if (echoWin.length > 25) echoWin.shift(); }
   else { echoWin.length = 0; noiseFloor = rms < noiseFloor ? noiseFloor * .8 + rms * .2 : noiseFloor * .995 + rms * .005; }
-  let thr = Math.max(noiseFloor * 2.8, 0.012);
+  const S = sens();
+  let thr = Math.max(noiseFloor * 2.8, S.startMin);
   if (hisVoice) {                                           // you must be clearly louder than his echo
     const sorted = [...echoWin].sort((a, b) => a - b), med = sorted[sorted.length >> 1] || 0;
-    thr = Math.max(med * 3, noiseFloor * 4, 0.03);
+    thr = Math.max(med * S.echoMul, noiseFloor * 4, S.minThr);
   }
   const loud = !!micAnalyser && rms > thr;
   // continuous voice time; a short dip (< 150 ms, between syllables) doesn't reset it
@@ -593,9 +621,9 @@ function endpointTick() {
   userLevel = !hisVoice && micAnalyser ? Math.min(1, rms * 12) : 0;
 
   // you talk over him -> he stops (doesn't wait for the recogniser)
-  if (hisVoice && micAnalyser && echoWin.length >= 6 && loudRun >= 280) { bargeIn(); return; }
+  if (hisVoice && micAnalyser && !S.needWords && echoWin.length >= 6 && loudRun >= S.bargeMs) { bargeIn(); return; }
   // you start talking -> your turn begins (recording starts too)
-  if (!busy() && !transcribing && !turnActive && loudRun >= 120) beginTurn();
+  if (!busy() && !transcribing && !turnActive && loudRun >= S.startMs && now - lastSpokeAt > 600) beginTurn();
 
   if (!turnActive || busy() || transcribing) return;
   const pause = +$('pause').value;
@@ -633,6 +661,8 @@ $('talk').onclick = toggleConvo;
 $('listenLang').value = store.get('nk.listenLang', 'en-IN');
 $('listenLang').onchange = e => { store.set('nk.listenLang', e.target.value); if (rec) try { rec.abort(); } catch {} };
 $('pause').value = store.get('nk.pause', '950');
+$('sens').value = store.get('nk.sens', 'low');
+$('sens').onchange = e => store.set('nk.sens', e.target.value);
 $('pause').onchange = e => store.set('nk.pause', e.target.value);
 function pace() { return +$('pace').value || 0.88; }
 $('pace').value = store.get('nk.pace', '0.88');
