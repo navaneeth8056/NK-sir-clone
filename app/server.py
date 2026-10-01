@@ -38,6 +38,14 @@ def _token() -> str:
 
 
 @app.middleware("http")
+async def vercel_path_fix(request: Request, call_next):
+    """Safety net: an old rewrite may deliver every page as /api/index; treat that as the home page."""
+    if request.scope["path"].rstrip("/") == "/api/index":
+        request.scope["path"] = "/"
+    return await call_next(request)
+
+
+@app.middleware("http")
 async def require_passcode(request: Request, call_next):
     if not os.getenv("APP_PASSCODE") or request.url.path in OPEN_PATHS:
         return await call_next(request)
