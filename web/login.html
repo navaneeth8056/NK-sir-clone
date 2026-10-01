@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NK Chaudhary · Enter passcode</title>
+<style>
+  :root { --bg:#0d0f12; --panel:#15181d; --line:#262b33; --text:#ecebe8; --muted:#8d949e; --cyan:#3fc6ff; --err:#ff9b8f; }
+  * { box-sizing:border-box; }
+  html, body { height:100%; }
+  body { margin:0; background:radial-gradient(ellipse at 50% 30%, #1a1f27 0%, var(--bg) 65%); color:var(--text);
+         font:15px/1.55 "Segoe UI", system-ui, -apple-system, Roboto, sans-serif; display:grid; place-items:center; padding:16px; }
+  .card { width:min(360px, 100%); text-align:center; }
+  .orb { width:150px; aspect-ratio:1; margin:0 auto 26px; border-radius:50%; background:#fff; color:#111;
+         display:flex; align-items:center; justify-content:center; box-shadow:0 0 60px rgba(63,198,255,.18); }
+  .orb .mark { display:flex; flex-direction:column; align-items:flex-start; transform:translateX(-4%); }
+  .orb .w1 { font-size:42px; font-weight:800; letter-spacing:-1px; line-height:.95; }
+  .orb .w2 { font-size:19px; font-weight:500; line-height:1.1; }
+  p { color:var(--muted); margin:0 0 18px; }
+  form { display:flex; gap:8px; }
+  input { flex:1; min-width:0; background:var(--panel); color:var(--text); border:1px solid var(--line); border-radius:12px; padding:12px 14px; font:inherit; }
+  input:focus { outline:none; border-color:#3a4250; }
+  button { background:#fff; color:#111; border:0; border-radius:12px; padding:0 18px; font:inherit; font-weight:700; cursor:pointer; }
+  .err { color:var(--err); min-height:1.5em; margin-top:10px; font-size:13.5px; }
+</style>
+</head>
+<body>
+<div class="card">
+  <div class="orb"><span class="mark"><span class="w1">NK</span><span class="w2">Chaudhary</span></span></div>
+  <p>This AI recreation is private. Enter the passcode to continue.</p>
+  <form id="f">
+    <input id="code" type="password" autocomplete="current-password" placeholder="Passcode" autofocus aria-label="Passcode">
+    <button>Enter</button>
+  </form>
+  <div class="err" id="err" role="alert"></div>
+</div>
+<script>
+document.getElementById('f').onsubmit = async e => {
+  e.preventDefault();
+  const err = document.getElementById('err'); err.textContent = '';
+  const r = await fetch('/api/login', { method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({ passcode: document.getElementById('code').value }) });
+  if (r.ok) location.href = '/';
+  else err.textContent = r.status === 401 ? 'Wrong passcode. Please try again.' : 'Something went wrong (' + r.status + ').';
+};
+</script>
+</body>
+</html>

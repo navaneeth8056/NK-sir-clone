@@ -1,0 +1,202 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Conversations · NK Chaudhary</title>
+<style>
+  :root {
+    --bg:#0d0f12; --panel:#15181d; --panel2:#1b1f26; --line:#262b33; --text:#ecebe8; --muted:#8d949e;
+    --cyan:#3fc6ff; --pink:#ff5ea8; --me:#1f2630; --warn:#ffb86b;
+  }
+  * { box-sizing:border-box; }
+  html, body { height:100%; }
+  body { margin:0; background:var(--bg); color:var(--text); font:15px/1.55 "Segoe UI", system-ui, -apple-system, Roboto, sans-serif;
+         display:flex; flex-direction:column; overflow:hidden; }
+  [hidden] { display:none !important; }
+  a { color:inherit; }
+
+  .top { display:flex; align-items:center; gap:12px; padding:12px 18px; border-bottom:1px solid var(--line); flex:none; }
+  .top h1 { font-size:16px; margin:0; font-weight:600; }
+  .top .sp { flex:1; }
+  .btn { display:inline-flex; align-items:center; gap:7px; color:var(--text); text-decoration:none; font:inherit; font-size:13.5px; font-weight:600;
+         border:1px solid var(--line); background:var(--panel); border-radius:999px; padding:6px 14px; cursor:pointer; }
+  .btn:hover { border-color:#3a4250; background:var(--panel2); }
+  .btn svg { width:16px; height:16px; }
+  .btn.danger:hover { border-color:#7a3340; color:#ff9b8f; }
+
+  .wrap { flex:1; display:grid; grid-template-columns:minmax(260px, 340px) 1fr; min-height:0; }
+  .side { border-right:1px solid var(--line); display:flex; flex-direction:column; min-height:0; }
+  .search { padding:12px; border-bottom:1px solid var(--line); }
+  .search input { width:100%; background:var(--panel); color:var(--text); border:1px solid var(--line); border-radius:10px; padding:9px 12px; font:inherit; }
+  .search input:focus { outline:none; border-color:#3a4250; }
+  #list { overflow-y:auto; flex:1; }
+  .day { font-size:11.5px; letter-spacing:.6px; text-transform:uppercase; color:var(--muted); padding:14px 16px 6px; }
+  .item { display:block; width:100%; text-align:left; background:none; border:0; border-left:3px solid transparent; color:var(--text);
+          padding:10px 14px 10px 13px; cursor:pointer; font:inherit; }
+  .item:hover { background:var(--panel); }
+  .item[aria-current="true"] { background:var(--panel2); border-left-color:var(--cyan); }
+  .item .t { display:block; font-size:14px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .item .m { display:flex; gap:8px; align-items:center; font-size:12px; color:var(--muted); margin-top:2px; }
+  .tag { font-size:10.5px; letter-spacing:.4px; border-radius:999px; padding:1px 7px; border:1px solid var(--line); }
+  .tag.voice { color:var(--pink); border-color:rgba(255,94,168,.35); }
+  .tag.text { color:var(--cyan); border-color:rgba(63,198,255,.35); }
+
+  .main { display:flex; flex-direction:column; min-height:0; }
+  .head { display:flex; align-items:center; gap:10px; flex-wrap:wrap; padding:14px 22px; border-bottom:1px solid var(--line); }
+  .head .title { font-weight:600; flex:1; min-width:200px; }
+  .head .sub { font-size:12.5px; color:var(--muted); font-weight:400; display:block; }
+  #thread { flex:1; overflow-y:auto; padding:18px 22px 30px; }
+  .inner { max-width:780px; margin:0 auto; display:flex; flex-direction:column; gap:12px; }
+  .msg { padding:9px 13px; border-radius:12px; max-width:86%; white-space:pre-wrap; }
+  .msg .meta { display:block; font-size:11px; color:var(--muted); margin-top:4px; }
+  .me { align-self:flex-end; background:var(--me); }
+  .nk { align-self:flex-start; background:var(--panel); border:1px solid var(--line); }
+  .nk .who { display:block; font-size:11px; letter-spacing:.6px; color:var(--cyan); font-weight:600; margin-bottom:2px; }
+  .err { align-self:center; color:#ff9b8f; font-size:13px; }
+  .empty { color:var(--muted); text-align:center; padding:60px 20px; }
+  .back { display:none; }
+
+  @media (max-width:760px) {
+    .wrap { grid-template-columns:1fr; }
+    .side { border-right:0; }
+    body.reading .side { display:none; }
+    body:not(.reading) .main { display:none; }
+    .back { display:inline-flex; }
+    #count { display:none; }
+    .top .btn { white-space:nowrap; }
+    .top h1 { font-size:15px; }
+  }
+</style>
+</head>
+<body>
+
+<div class="top">
+  <a class="btn" href="/" title="Back to the conversation">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"/></svg>
+    NK Chaudhary
+  </a>
+  <h1>Conversation history</h1>
+  <span class="sp"></span>
+  <span id="count" style="font-size:13px;color:var(--muted)"></span>
+</div>
+
+<div class="wrap">
+  <aside class="side">
+    <div class="search"><input id="q" type="search" placeholder="Search conversations…" aria-label="Search conversations"></div>
+    <nav id="list" aria-label="Conversations"></nav>
+  </aside>
+
+  <section class="main">
+    <div class="head" id="head" hidden>
+      <button class="btn back" id="back" type="button">‹ All</button>
+      <div class="title"><span id="title"></span><span class="sub" id="sub"></span></div>
+      <button class="btn" id="download" type="button" title="Download as a text file">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12M7 10l5 5 5-5M5 21h14"/></svg>
+        Download
+      </button>
+      <button class="btn danger" id="del" type="button" title="Delete this conversation">Delete</button>
+    </div>
+    <div id="thread"><div class="empty" id="placeholder">Choose a conversation on the left.</div></div>
+  </section>
+</div>
+
+<script>
+const $ = id => document.getElementById(id);
+let all = [], current = null;
+
+const fmtDay = iso => new Date(iso).toLocaleDateString(undefined, { weekday:'short', day:'numeric', month:'short', year:'numeric' });
+const fmtTime = iso => new Date(iso).toLocaleTimeString(undefined, { hour:'2-digit', minute:'2-digit' });
+function dayLabel(iso) {
+  const d = new Date(iso), t = new Date(), y = new Date(); y.setDate(t.getDate() - 1);
+  if (d.toDateString() === t.toDateString()) return 'Today';
+  if (d.toDateString() === y.toDateString()) return 'Yesterday';
+  return fmtDay(iso);
+}
+function duration(c) {
+  const m = c.messages; if (!m.length) return '';
+  const s = (new Date(m[m.length - 1].at) - new Date(c.started_at)) / 1000;
+  return s < 60 ? `${Math.max(1, Math.round(s))} sec` : `${Math.round(s / 60)} min`;
+}
+
+async function loadList() {
+  try { all = await (await fetch('/api/conversations', { cache:'no-store' })).json(); }
+  catch { all = []; }
+  $('count').textContent = all.length ? `${all.length} conversation${all.length > 1 ? 's' : ''}` : '';
+  renderList();
+  const want = location.hash.slice(1) || (innerWidth > 760 && all[0]?.id);
+  if (want) open(want, false);
+}
+
+function renderList() {
+  const term = $('q').value.trim().toLowerCase();
+  const items = all.filter(c => !term || c.title.toLowerCase().includes(term) || (c._text || '').includes(term));
+  const list = $('list'); list.innerHTML = '';
+  if (!items.length) { list.innerHTML = `<div class="empty">${all.length ? 'No matches.' : 'No conversations yet.<br>Talk to NK Chaudhary and they will appear here.'}</div>`; return; }
+  let lastDay = '';
+  for (const c of items) {
+    const day = dayLabel(c.started_at);
+    if (day !== lastDay) { const h = document.createElement('div'); h.className = 'day'; h.textContent = day; list.appendChild(h); lastDay = day; }
+    const b = document.createElement('button'); b.className = 'item'; b.dataset.id = c.id;
+    b.setAttribute('aria-current', c.id === current?.id);
+    b.innerHTML = `<span class="t"></span><span class="m"><span>${fmtTime(c.started_at)}</span><span>·</span><span>${Math.ceil(c.messages / 2)} exchange${c.messages > 2 ? 's' : ''}</span><span class="tag ${c.mode}">${c.mode === 'voice' ? 'VOICE' : 'TEXT'}</span></span>`;
+    b.querySelector('.t').textContent = c.title;
+    b.onclick = () => open(c.id);
+    list.appendChild(b);
+  }
+}
+
+async function open(id, push = true) {
+  let c;
+  try { const r = await fetch('/api/conversations/' + encodeURIComponent(id), { cache:'no-store' }); if (!r.ok) throw 0; c = await r.json(); }
+  catch { return; }
+  current = c;
+  if (push) history.replaceState(null, '', '#' + id);
+  document.body.classList.add('reading');
+  document.querySelectorAll('.item').forEach(b => b.setAttribute('aria-current', b.dataset.id === id));
+  const s = all.find(x => x.id === id);
+  $('head').hidden = false;
+  $('title').textContent = s?.title || 'Conversation';
+  $('sub').textContent = `${fmtDay(c.started_at)} · ${fmtTime(c.started_at)} · ${duration(c)} · ${s?.mode === 'voice' ? 'Voice conversation' : 'Typed conversation'}`;
+  const th = $('thread'); th.innerHTML = '<div class="inner"></div>'; const inner = th.firstChild;
+  for (const m of c.messages) {
+    const d = document.createElement('div');
+    if (m.role === 'user') { d.className = 'msg me'; d.textContent = m.text; }
+    else if (m.role === 'assistant') { d.className = 'msg nk'; d.innerHTML = '<span class="who">NK CHAUDHARY</span><span class="b"></span>'; d.querySelector('.b').textContent = m.text; }
+    else { d.className = 'err'; d.textContent = m.text; inner.appendChild(d); continue; }
+    const meta = document.createElement('span'); meta.className = 'meta';
+    meta.textContent = fmtTime(m.at) + (m.mode === 'voice' ? (m.role === 'user' ? ' · spoken' : ' · said aloud') : '') + (m.interrupted ? ' · interrupted' : '');
+    d.appendChild(meta); inner.appendChild(d);
+  }
+  if (!c.messages.length) inner.innerHTML = '<div class="empty">This conversation is empty.</div>';
+  th.scrollTop = 0;
+}
+
+$('q').oninput = renderList;
+$('back').onclick = () => { document.body.classList.remove('reading'); history.replaceState(null, '', location.pathname); };
+
+$('download').onclick = () => {
+  if (!current) return;
+  const lines = [`Conversation with NK Chaudhary (AI recreation)`, `${fmtDay(current.started_at)} ${fmtTime(current.started_at)}`, ''];
+  for (const m of current.messages) {
+    if (m.role === 'error') continue;
+    lines.push(`[${fmtTime(m.at)}] ${m.role === 'user' ? 'You' : 'NK Chaudhary'}: ${m.text}${m.interrupted ? ' (interrupted)' : ''}`, '');
+  }
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([lines.join('\n')], { type:'text/plain;charset=utf-8' }));
+  a.download = `nk-chaudhary-${current.id}.txt`; a.click(); URL.revokeObjectURL(a.href);
+};
+
+$('del').onclick = async () => {
+  if (!current || !confirm('Delete this conversation permanently?')) return;
+  await fetch('/api/conversations/' + encodeURIComponent(current.id), { method:'DELETE' });
+  current = null; $('head').hidden = true;
+  $('thread').innerHTML = '<div class="empty">Conversation deleted.</div>';
+  document.body.classList.remove('reading'); history.replaceState(null, '', location.pathname);
+  loadList();
+};
+
+loadList();
+</script>
+</body>
+</html>
